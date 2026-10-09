@@ -28,26 +28,30 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db.init_app(app)
 
-with app.app_context():
-    db.create_all()
-    try:
-        inspector = inspect(db.engine)
-        if 'orders' in inspector.get_table_names():
-            columns = [col['name'] for col in inspector.get_columns('orders')]
-            if 'status' not in columns:
-                db.session.execute(text("ALTER TABLE orders ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'COMPLETED'"))
-                db.session.commit()
-            if 'cancel_reason' not in columns:
-                db.session.execute(text("ALTER TABLE orders ADD COLUMN cancel_reason VARCHAR(255) NULL"))
-                db.session.commit()
-            if 'cancelled_at' not in columns:
-                db.session.execute(text("ALTER TABLE orders ADD COLUMN cancelled_at DATETIME NULL"))
-                db.session.commit()
-    except Exception as e:
-        print(f"Warning during schema check: {e}")
+def init_database_if_needed():
+    with app.app_context():
+        db.create_all()
+        try:
+            inspector = inspect(db.engine)
+            if 'orders' in inspector.get_table_names():
+                columns = [col['name'] for col in inspector.get_columns('orders')]
+                if 'status' not in columns:
+                    db.session.execute(text("ALTER TABLE orders ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'COMPLETED'"))
+                    db.session.commit()
+                if 'cancel_reason' not in columns:
+                    db.session.execute(text("ALTER TABLE orders ADD COLUMN cancel_reason VARCHAR(255) NULL"))
+                    db.session.commit()
+                if 'cancelled_at' not in columns:
+                    db.session.execute(text("ALTER TABLE orders ADD COLUMN cancelled_at DATETIME NULL"))
+                    db.session.commit()
+        except Exception as e:
+            print(f"Warning during schema check: {e}")
 
-    # Auto seed initial kebab data if empty
-    seed_kebab_data()
+        seed_kebab_data()
+
+if not os.environ.get('VERCEL'):
+    init_database_if_needed()
+
 
 
 @app.route('/')
