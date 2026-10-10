@@ -138,9 +138,31 @@ def update_ingredient(id):
 @app.route('/api/ingredients/<int:id>', methods=['DELETE'])
 def delete_ingredient(id):
     ing = Ingredient.query.get_or_404(id)
-    db.session.delete(ing)
-    db.session.commit()
-    return jsonify({'status': 'success', 'message': f'Bahan {ing.name} berhasil dihapus'})
+    try:
+        RecipeItem.query.filter_by(ingredient_id=id).delete()
+        StockMovement.query.filter_by(ingredient_id=id).delete()
+        db.session.delete(ing)
+        db.session.commit()
+        return jsonify({'status': 'success', 'message': f'Bahan {ing.name} berhasil dihapus'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'status': 'error', 'message': f'Gagal menghapus bahan: {str(e)}'}), 500
+
+
+@app.route('/api/inventory/reset-all', methods=['POST'])
+def reset_all_inventory():
+    try:
+        ingredients = Ingredient.query.all()
+        for ing in ingredients:
+            ing.current_stock = 0.0
+        db.session.commit()
+        return jsonify({
+            'status': 'success',
+            'message': f'Seluruh stok dari {len(ingredients)} bahan berhasil dikosongkan (0)'
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'status': 'error', 'message': f'Gagal mengosongkan stok: {str(e)}'}), 500
 
 
 @app.route('/api/inventory/restock', methods=['POST'])
@@ -318,6 +340,21 @@ def get_orders():
         'count': len(orders),
         'data': [o.to_dict() for o in orders]
     })
+
+
+@app.route('/api/orders', methods=['DELETE'])
+def clear_all_orders():
+    try:
+        OrderItem.query.delete()
+        Order.query.delete()
+        db.session.commit()
+        return jsonify({
+            'status': 'success',
+            'message': 'Seluruh riwayat transaksi berhasil dihapus dan omzet/laba telah ter-reset ke 0.'
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'status': 'error', 'message': f'Gagal menghapus riwayat transaksi: {str(e)}'}), 500
 
 
 @app.route('/api/orders/<int:order_id>/cancel', methods=['POST'])
