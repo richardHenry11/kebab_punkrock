@@ -252,10 +252,16 @@ def create_order():
     total_rev = 0.0
     total_hpp = 0.0
 
+    initial_status = (data.get('status') or 'PENDING').strip().upper()
+    valid_initial = ['PENDING', 'PROCESSING', 'COMPLETED']
+    if initial_status not in valid_initial:
+        initial_status = 'PENDING'
+
     order = Order(
         order_number=order_num,
         payment_method=data.get('payment_method', 'CASH'),
-        notes=data.get('notes', '')
+        notes=data.get('notes', ''),
+        status=initial_status
     )
     db.session.add(order)
     db.session.flush()
@@ -332,7 +338,21 @@ def get_orders():
             return jsonify({'status': 'error', 'message': 'Format tanggal harus YYYY-MM-DD'}), 400
 
     if status_filter:
-        query = query.filter(Order.status == status_filter.upper())
+        s_upper = status_filter.strip().upper()
+        status_map = {
+            'PENDING': 'PENDING',
+            'MENUNGGU': 'PENDING',
+            'PROCESSING': 'PROCESSING',
+            'SEDANG_DIKERJAKAN': 'PROCESSING',
+            'SEDANG DIKERJAKAN': 'PROCESSING',
+            'COOKING': 'PROCESSING',
+            'COMPLETED': 'COMPLETED',
+            'SELESAI': 'COMPLETED',
+            'CANCELLED': 'CANCELLED',
+            'DIBATALKAN': 'CANCELLED'
+        }
+        canonical = status_map.get(s_upper, s_upper)
+        query = query.filter(Order.status == canonical)
 
     orders = query.order_by(Order.created_at.desc()).all()
     return jsonify({
@@ -401,6 +421,62 @@ def cancel_order(order_id):
     return jsonify({
         'status': 'success',
         'message': f'Pesanan #{order.order_number} berhasil dibatalkan dan seluruh stok bahan telah dikembalikan ke inventaris!',
+        'data': order.to_dict()
+    })
+
+
+@app.route('/api/orders/<int:order_id>/status', methods=['PUT', 'PATCH', 'POST'])
+def update_order_status(order_id):
+    order = Order.query.get(order_id)
+    if not order:
+        return jsonify({'status': 'error', 'message': f'Pesanan dengan ID {order_id} tidak ditemukan'}), 404
+
+    data = request.get_json(silent=True) or {}
+    raw_status = (data.get('status') or '').strip().upper()
+
+    status_map = {
+        'PENDING': 'PENDING',
+        'MENUNGGU': 'PENDING',
+        'PROCESSING': 'PROCESSING',
+        'SEDANG_DIKERJAKAN': 'PROCESSING',
+        'SEDANG DIKERJAKAN': 'PROCESSING',
+        'COOKING': 'PROCESSING',
+        'COMPLETED': 'COMPLETED',
+        'SELESAI': 'COMPLETED',
+        'CANCELLED': 'CANCELLED',
+        'DIBATALKAN': 'CANCELLED'
+    }
+
+    canonical = status_map.get(raw_status)
+    if not canonical:
+        return jsonify({
+            'status': 'error',
+            'message': 'Status tidak valid. Pilih antara: PENDING (menunggu), PROCESSING (sedang dikerjakan), atau COMPLETED (selesai)'
+        }), 400
+
+    if canonical == 'CANCELLED':
+        # Gunakan fungsi cancel_order agar stok bahan otomatis dikembalikan
+        return cancel_order(order_id)
+
+    # Jika sebelumnya CANCELLED dan hendak diubah ke status aktif, tidak diperbolehkan secara langsung karena stok sudah di-rollback
+    if order.status == 'CANCELLED':
+        return jsonify({
+            'status': 'error',
+            'message': 'Pesanan yang sudah dibatalkan tidak dapat diaktifkan kembali secara langsung.'
+        }), 400
+
+    order.status = canonical
+    db.session.commit()
+
+    label_map = {
+        'PENDING': 'Pending (Menunggu)',
+        'PROCESSING': 'Sedang Dikerjakan',
+        'COMPLETED': 'Selesai'
+    }
+
+    return jsonify({
+        'status': 'success',
+        'message': f'Status pesanan #{order.order_number} berhasil diubah menjadi {label_map.get(canonical, canonical)}',
         'data': order.to_dict()
     })
 
